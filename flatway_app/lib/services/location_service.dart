@@ -23,7 +23,9 @@ class LocationService {
 
   /// Check location service and permissions, then return current LatLng position.
   /// Returns null if GPS is disabled or permissions are denied.
-  static Future<Position?> getCurrentPosition() async {
+  static Future<Position?> getCurrentPosition({
+    bool preferLastKnown = true,
+  }) async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       debugPrint('Location services are disabled.');
@@ -46,8 +48,10 @@ class LocationService {
 
     try {
       // 1. Try last known position first for instant speed on startup
-      Position? lastPos = await Geolocator.getLastKnownPosition();
-      if (lastPos != null) return lastPos;
+      if (preferLastKnown) {
+        final lastPos = await Geolocator.getLastKnownPosition();
+        if (lastPos != null) return lastPos;
+      }
 
       // 2. Fetch high-accuracy current position
       return await Geolocator.getCurrentPosition(
