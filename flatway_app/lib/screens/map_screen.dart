@@ -976,7 +976,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _toggleRouteTracking() {
-    if (widget.readOnly) {
+    if (widget.readOnly && !widget.webMode) {
       _showWebReadOnlyMessage('센서 이동 수집');
       return;
     }
@@ -988,7 +988,19 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _startRouteTracking() {
+  Future<void> _startRouteTracking() async {
+    if (widget.webMode) {
+      final position = await LocationService.getCurrentPosition(preferLastKnown: false);
+      if (!mounted) return;
+      if (position == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('현재 위치를 확인할 수 없어 이동 수집을 시작하지 못했습니다.')),
+        );
+        return;
+      }
+      _currentLocation = LatLng(position.latitude, position.longitude);
+    }
+
     setState(() {
       _isTrackingRoute = true;
       _trackedPoints.clear();
@@ -1016,19 +1028,25 @@ class _MapScreenState extends State<MapScreen> {
       } catch (_) {}
     });
 
-    _accelStreamSub = userAccelerometerEventStream().listen((UserAccelerometerEvent event) {
-      if (!_isTrackingRoute) return;
-      final magnitude = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
-      final now = DateTime.now();
-      if (magnitude > 14.0 && now.difference(_lastBumpTime).inSeconds >= 4) {
-        _lastBumpTime = now;
-        _handleAutoDetectedBump(magnitude);
-      }
-    });
+    if (!widget.webMode) {
+      _accelStreamSub = userAccelerometerEventStream().listen((UserAccelerometerEvent event) {
+        if (!_isTrackingRoute) return;
+        final magnitude = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
+        final now = DateTime.now();
+        if (magnitude > 14.0 && now.difference(_lastBumpTime).inSeconds >= 4) {
+          _lastBumpTime = now;
+          _handleAutoDetectedBump(magnitude);
+        }
+      });
+    }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('이동 경로 및 노면 단차 자동 수집이 시작되었습니다.'),
+      SnackBar(
+        content: Text(
+          widget.webMode
+              ? '이동 수집을 시작했습니다. 턱을 발견하면 큰 기록 버튼을 누르세요.'
+              : '이동 경로 및 노면 단차 자동 수집이 시작되었습니다.',
+        ),
         backgroundColor: Colors.purple,
         duration: Duration(seconds: 2),
       ),
@@ -1046,10 +1064,44 @@ class _MapScreenState extends State<MapScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '수집 종료! 이동거리: ${(_totalDistanceMeters / 1000).toStringAsFixed(2)}km, 자동 감지: $_autoDetectedBumpsCount건',
+          widget.webMode
+              ? '수집 종료! 이동거리: ${(_totalDistanceMeters / 1000).toStringAsFixed(2)}km, 직접 기록: $_autoDetectedBumpsCount건'
+              : '수집 종료! 이동거리: ${(_totalDistanceMeters / 1000).toStringAsFixed(2)}km, 자동 감지: $_autoDetectedBumpsCount건',
         ),
         backgroundColor: Colors.black87,
         duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  void _recordManualWebStep() {
+    if (!widget.webMode || !_isTrackingRoute) return;
+
+    final recordedAt = DateTime.now().toUtc();
+    setState(() {
+      _autoDetectedBumpsCount++;
+      _hazards.insert(0, {
+        'id': 'web_local_${recordedAt.microsecondsSinceEpoch}',
+        'type': 'step',
+        'latitude': _currentLocation.latitude,
+        'longitude': _currentLocation.longitude,
+        'step_height_cm': null,
+        'severity': 'medium',
+        'description': '웹 이동 수집 중 사용자가 직접 기록한 턱',
+        'is_verified': false,
+        'reported_at': recordedAt.toIso8601String(),
+        'status': 'local_preview',
+      });
+      _selectedCategoryFilter = 'all';
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '현재 위치에 턱을 기록했습니다. (${_currentLocation.latitude.toStringAsFixed(5)}, ${_currentLocation.longitude.toStringAsFixed(5)})',
+        ),
+        backgroundColor: const Color(0xFF047857),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
@@ -2145,13 +2197,36 @@ class _MapScreenState extends State<MapScreen> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    '실시간 이동 수집 중 (${(_totalDistanceMeters / 1000).toStringAsFixed(2)}km, 충격: $_autoDetectedBumpsCount건)',
+                                    widget.webMode
+                                        ? '이동 수집 중 (${(_totalDistanceMeters / 1000).toStringAsFixed(2)}km, 직접 기록: $_autoDetectedBumpsCount건)'
+                                        : '실시간 이동 수집 중 (${(_totalDistanceMeters / 1000).toStringAsFixed(2)}km, 충격: $_autoDetectedBumpsCount건)',
                                     style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF111111)),
                                   ),
                                 ),
                               ],
                             ),
                             const Divider(height: 12, color: Color(0xFFEFEFEF)),
+                            if (widget.webMode) ...[
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: _recordManualWebStep,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFF59E0B),
+                                    foregroundColor: const Color(0xFF111827),
+                                    elevation: 0,
+                                    minimumSize: const Size.fromHeight(58),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                  icon: const Icon(Icons.add_location_alt_rounded, size: 25),
+                                  label: const Text(
+                                    '이 위치에 턱 기록',
+                                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                            ],
                           ],
                           Row(
                             children: [
