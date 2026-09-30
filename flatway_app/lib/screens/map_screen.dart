@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -14,7 +15,14 @@ import '../widgets/auth_modal.dart';
 import '../widgets/report_modal.dart';
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  const MapScreen({
+    super.key,
+    this.webMode = false,
+    this.readOnly = false,
+  });
+
+  final bool webMode;
+  final bool readOnly;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -157,8 +165,10 @@ class _MapScreenState extends State<MapScreen> {
     super.initState();
     _loadSupabaseData();
     _fetchCurrentLocation();
-    _startRealtimeLocationTracking();
-    _startCompassHeadingListener();
+    if (!widget.webMode) {
+      _startRealtimeLocationTracking();
+      _startCompassHeadingListener();
+    }
   }
 
   @override
@@ -966,6 +976,11 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _toggleRouteTracking() {
+    if (widget.readOnly) {
+      _showWebReadOnlyMessage('센서 이동 수집');
+      return;
+    }
+
     if (_isTrackingRoute) {
       _stopRouteTracking();
     } else {
@@ -1079,6 +1094,18 @@ class _MapScreenState extends State<MapScreen> {
     LocationPermission permission = await LocationService.checkPermission();
 
     if (!serviceEnabled || permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      if (kIsWeb) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('브라우저 주소창의 위치 권한을 허용한 뒤 새로고침해 주세요.'),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+
       if (mounted && !_isGpsRequiredModalOpen) {
         _isGpsRequiredModalOpen = true;
         _showMandatoryGpsDialog();
@@ -1256,6 +1283,11 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _openReportModal(LatLng loc) {
+    if (widget.readOnly) {
+      _showWebReadOnlyMessage('위험 요인 제보');
+      return;
+    }
+
     final placeName = _findNearestPlaceName(loc);
     showModalBottomSheet(
       context: context,
@@ -1274,6 +1306,11 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _showAuthModal() {
+    if (widget.readOnly) {
+      _showWebReadOnlyMessage('로그인과 회원가입');
+      return;
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1284,6 +1321,16 @@ class _MapScreenState extends State<MapScreen> {
         onAuthChanged: () {
           setState(() {});
         },
+      ),
+    );
+  }
+
+  void _showWebReadOnlyMessage(String feature) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$feature 기능은 데이터 권한을 확인한 뒤 웹에 연결할 예정입니다.'),
+        backgroundColor: const Color(0xFF1E2742),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -1554,6 +1601,24 @@ class _MapScreenState extends State<MapScreen> {
               'FlatWay',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
             ),
+            if (widget.webMode) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE6F4EE),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Text(
+                  '웹 체험 · 예시 데이터',
+                  style: TextStyle(
+                    color: Color(0xFF047857),
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
         backgroundColor: Colors.white,

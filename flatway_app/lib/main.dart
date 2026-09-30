@@ -1,15 +1,18 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'screens/map_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/web_location_capture_screen.dart';
 import 'services/supabase_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // 웹 위치 기록 실험은 학생 팀의 운영 DB와 완전히 분리한다.
-  if (!kIsWeb) {
-    await SupabaseService.initialize();
+  final isLocationExperiment =
+      kIsWeb && Uri.base.queryParameters['mode'] == 'location';
+
+  if (!isLocationExperiment) {
+    await SupabaseService.initialize(readOnlyMode: kIsWeb);
   }
   runApp(const FlatWayApp());
 }
@@ -19,6 +22,9 @@ class FlatWayApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLocationExperiment =
+        kIsWeb && Uri.base.queryParameters['mode'] == 'location';
+
     return MaterialApp(
       title: 'FlatWay',
       debugShowCheckedModeBanner: false,
@@ -32,7 +38,11 @@ class FlatWayApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: kIsWeb ? const WebLocationCaptureScreen() : const SplashScreen(),
+      home: isLocationExperiment
+          ? const WebLocationCaptureScreen()
+          : kIsWeb
+          ? const MapScreen(webMode: true, readOnly: true)
+          : const SplashScreen(),
     );
   }
 }
